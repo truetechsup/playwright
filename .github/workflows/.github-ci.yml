@@ -48,7 +48,7 @@ jobs:
             --url "${{ secrets.TMS_URL }}" \
             --configuration-id "${{ github.event.client_payload.configuration_id[0] }}" \
             --testrun-id "${{ github.event.client_payload.test_run_id }}" \
-            --framework golang \
+            --framework playwright \
             --disable-cert-validation \
             --output tmp/filter.txt
 
