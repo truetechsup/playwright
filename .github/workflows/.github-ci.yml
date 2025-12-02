@@ -128,7 +128,7 @@ jobs:
           echo "No tests to run according to filter"
           exit 0
           fi
-          
+          echo "Test Run ID: $TMS_TEST_RUN_ID"
           npx playwright test --grep "$(cat tmp/filter.txt)"
 
       - name: Upload Playwright report

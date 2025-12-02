@@ -4,7 +4,7 @@
   "projectId": "019adf50-3bea-7667-8b7a-aa357623ba61",
   "configurationId": "019adf50-3c1c-796d-8810-d8e3c5c4df96",
   "testRunName": "All tests",
-  "adapterMode": 2,
+  "adapterMode": 1,
   "automaticCreationTestCases": true,
   "automaticUpdationLinksToTestCases": false,
   "certValidation": false
