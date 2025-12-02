@@ -20,8 +20,18 @@ jobs:
 
       - name: Install Playwright and TestIT adapter
         run: |
+          # Инициализируем package.json если его нет
+          if [ ! -f package.json ]; then
+            npm init -y
+          fi
+          
+          # Устанавливаем Playwright
+          npm install @playwright/test
+          
+          # Устанавливаем адаптер TestIT для Playwright
           npm install testit-adapter-playwright@3.4.7
           
+          # Устанавливаем браузеры
           npx playwright install --with-deps
 
       - name: Run Playwright tests
