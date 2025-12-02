@@ -2,7 +2,9 @@ import { test, expect } from "@playwright/test";
 import { testit } from "testit-adapter-playwright";
 
 test('without annotations success', () => {
-  expect(true).toBe(true);
+
+  expect(false).toBe(false);
+
 });
 
 test('without annotations failed', () => {
