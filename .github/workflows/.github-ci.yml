@@ -3,7 +3,7 @@ name: Playwright Tests
 on:
   repository_dispatch:
     types: [run-tests]
-    
+
 jobs:
 
   setup-filter:
@@ -33,10 +33,6 @@ jobs:
           echo "PROJECT_ID=${{ github.event.client_payload.project_id }}" >> $GITHUB_OUTPUT
           echo "CONFIGURATION_IDS=${{ github.event.client_payload.configuration_id[0] }}" >> $GITHUB_OUTPUT
 
-          echo "Variables set:"
-          echo "TEST_RUN_ID=${{ github.event.client_payload.test_run_id }}"
-          echo "PROJECT_ID=${{ github.event.client_payload.project_id }}"
-          echo "CONFIGURATION_IDS=${{ github.event.client_payload.configuration_id[0] }}"
 
       - name: Setup TestIT filter
         run: |
@@ -74,6 +70,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    needs: setup-filter
 
     steps:
       - uses: actions/checkout@v3
