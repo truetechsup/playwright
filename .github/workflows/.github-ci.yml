@@ -24,7 +24,7 @@ jobs:
       - name: Install testit-cli
         run: |
           python -m pip install --upgrade pip
-          pip install testit-cli==2.7.3
+          pip install testit-cli==2.8.0
 
       - name: Get data from webhook
         id: set-vars
@@ -109,7 +109,7 @@ jobs:
           fi
           
           npm install @playwright/test
-          npm install testit-adapter-playwright@3.4.7
+          npm install testit-adapter-playwright@3.7.0
           npx playwright install --with-deps
 
       - name: Create TestIT configuration
