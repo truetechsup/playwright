@@ -89,6 +89,7 @@ jobs:
     - name: Install dependencies
       run: |
         npm install
+        npm install testit-adapter-playwright@3.7.0
         npx playwright install --with-deps
     
     - name: Run Playwright tests (adapterMode=1)
