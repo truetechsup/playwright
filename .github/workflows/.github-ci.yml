@@ -88,7 +88,10 @@ jobs:
     
     - name: Install dependencies
       run: |
-        npm install
+        if [ ! -f package.json ]; then
+          npm init -y
+        fi
+        npm install @playwright/test
         npm install testit-adapter-playwright@3.7.0
         npx playwright install --with-deps
     
