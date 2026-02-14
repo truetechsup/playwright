@@ -5,202 +5,124 @@ on:
     types: [run-tests]
 
 jobs:
-
-  setup-filter:
+  get-data-from-webhook:
     runs-on: ubuntu-latest
     outputs:
+      adapter_mode: ${{ steps.set-vars.outputs.ADAPTER_MODE }}
+      tms_url: ${{ steps.set-vars.outputs.TMS_URL }}
       test_run_id: ${{ steps.set-vars.outputs.TEST_RUN_ID }}
       project_id: ${{ steps.set-vars.outputs.PROJECT_ID }}
       configuration_ids: ${{ steps.set-vars.outputs.CONFIGURATION_IDS }}
-
+    
     steps:
-      - uses: actions/checkout@v3
+    - name: Get data from webhook
+      id: set-vars
+      run: |
+        echo "ADAPTER_MODE=${{ github.event.client_payload.adapter_mode }}" >> $GITHUB_OUTPUT
+        echo "TMS_URL=${{ github.event.client_payload.url }}" >> $GITHUB_OUTPUT
+        echo "TEST_RUN_ID=${{ github.event.client_payload.test_run_id }}" >> $GITHUB_OUTPUT
+        echo "PROJECT_ID=${{ github.event.client_payload.project_id }}" >> $GITHUB_OUTPUT
+        echo "CONFIGURATION_IDS=${{ github.event.client_payload.configuration_id[0] }}" >> $GITHUB_OUTPUT
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install testit-cli
-        run: |
-          python -m pip install --upgrade pip
-          pip install testit-cli==2.8.0
-
-      - name: Get data from webhook
-        id: set-vars
-        run: |
-          echo "TEST_RUN_ID=${{ github.event.client_payload.test_run_id }}" >> $GITHUB_OUTPUT
-          echo "PROJECT_ID=${{ github.event.client_payload.project_id }}" >> $GITHUB_OUTPUT
-          echo "CONFIGURATION_IDS=${{ github.event.client_payload.configuration_id[0] }}" >> $GITHUB_OUTPUT
-
-      - name: Setup TestIT filter
-        run: |
-          export TMS_TOKEN=${{ secrets.TMS_PRIVATE_TOKEN }}
-          mkdir -p tmp
-
-          echo "Generating test filter with parameters:"
-          echo "URL: ${{ secrets.TMS_URL }}"
-          echo "Configuration ID: ${{ github.event.client_payload.configuration_id[0] }}"
-          echo "Test Run ID: ${{ github.event.client_payload.test_run_id }}"
-
-          testit autotests_filter \
-            --url "${{ secrets.TMS_URL }}" \
-            --configuration-id "${{ github.event.client_payload.configuration_id[0] }}" \
-            --testrun-id "${{ github.event.client_payload.test_run_id }}" \
-            --framework playwright \
-            --disable-cert-validation \
-            --output tmp/filter.txt
-
-          echo "Filter file created:"
-          cat tmp/filter.txt
-
-          if [ ! -s tmp/filter.txt ]; then
-            echo "WARNING: Filter file is empty!"
-            echo "empty" > tmp/filter.txt
-          fi
-
-      - name: Upload filter artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-filter
-          path: tmp/filter.txt
-          retention-days: 1
-
-  test:
+  setup-filter:
     runs-on: ubuntu-latest
-    needs: setup-filter
-
+    needs: get-data-from-webhook
+    if: needs.get-data-from-webhook.outputs.adapter_mode == '1'
+    
     steps:
-      - uses: actions/checkout@v3
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.13'
+    
+    - name: Install testit-cli
+      run: |
+        python -m pip install --upgrade pip
+        pip install testit-cli==2.8.1
+    
+    - name: Setup TestIT filter
+      run: |
+        export TMS_TOKEN=${{ secrets.TMS_PRIVATE_TOKEN }}
+        mkdir -p tmp
+        
+        testit autotests_filter \
+          --url "${{ needs.get-data-from-webhook.outputs.tms_url }}" \
+          --configuration-id "${{ needs.get-data-from-webhook.outputs.configuration_ids }}" \
+          --testrun-id "${{ needs.get-data-from-webhook.outputs.test_run_id }}" \
+          --framework playwright \
+          --disable-cert-validation \
+          --output tmp/filter.txt
+        
+        if [ ! -s tmp/filter.txt ]; then
+          echo "empty" > tmp/filter.txt
+        fi
+    
+    - name: Upload filter artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-filter
+        path: tmp/filter.txt
+        retention-days: 1
 
-      - name: Download filter artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: test-filter
-          path: tmp/
-
-      - name: Debug outputs
-        run: |
-          echo "=== DEBUG OUTPUTS ==="
-          echo "test_run_id from setup-filter: ${{ needs.setup-filter.outputs.test_run_id }}"
-          echo "project_id from setup-filter: ${{ needs.setup-filter.outputs.project_id }}"
-          echo "configuration_ids from setup-filter: ${{ needs.setup-filter.outputs.configuration_ids }}"
-          
-          # Проверяем файл фильтра
-          if [ -f tmp/filter.txt ]; then
-            echo "Filter file content:"
-            cat tmp/filter.txt
-            echo ""
-            echo "Filter (trimmed): '$(cat tmp/filter.txt | xargs)'"
-          else
-            echo "Filter file NOT found!"
-          fi
-          echo "=== END DEBUG ==="
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-
-      - name: Install Playwright and TestIT adapter
-        run: |
-          if [ ! -f package.json ]; then
-            npm init -y
-          fi
-          
-          npm install @playwright/test
-          npm install testit-adapter-playwright@3.7.0
-          npx playwright install --with-deps
-
-      - name: Create TestIT configuration
-        run: |
-          # Создаем конфигурационный файл для TestIT
-          cat > testit.config.js << 'EOF'
-          module.exports = {
-            url: process.env.TMS_URL || '${{ secrets.TMS_URL }}',
-            privateToken: process.env.TMS_PRIVATE_TOKEN || '${{ secrets.TMS_PRIVATE_TOKEN }}',
-            projectId: process.env.TMS_PROJECT_ID || '${{ needs.setup-filter.outputs.project_id }}',
-            configurationId: process.env.TMS_CONFIGURATION_ID || '${{ needs.setup-filter.outputs.configuration_ids }}',
-            testRunId: process.env.TMS_TEST_RUN_ID || '${{ needs.setup-filter.outputs.test_run_id }}',
-            adapterMode: 0,  # 0 - автосоздание тест кейсов, 1 - фильтрация
-            certValidation: false,
-            automaticCreationTestCases: true
-          };
-          EOF
-          
-          echo "TestIT configuration created:"
-          cat testit.config.js
-
-      - name: Create Playwright config
-        run: |
-          cat > playwright.config.js << 'EOF'
-          const { defineConfig } = require('@playwright/test');
-          const testitConfig = require('./testit.config.js');
-
-          module.exports = defineConfig({
-            testDir: './tests',
-            timeout: 30000,
-            fullyParallel: false,
-            workers: 1,
-            reporter: [
-              ['list'],
-              ['html'],
-              ['@testit-reporter/testit-playwright', testitConfig]
-            ],
-            use: {
-              trace: 'on-first-retry',
-              screenshot: 'only-on-failure',
-            },
-            projects: [
-              {
-                name: 'chromium',
-                use: { browserName: 'chromium' },
-              }
-            ]
-          });
-          EOF
-          
-          echo "Playwright configuration created:"
-          cat playwright.config.js
-
-      - name: Run Playwright tests
-        env:
-          TMS_URL: ${{ secrets.TMS_URL }}
-          TMS_PRIVATE_TOKEN: ${{ secrets.TMS_PRIVATE_TOKEN }}
-          TMS_TEST_RUN_ID: ${{ needs.setup-filter.outputs.test_run_id }}
-          TMS_PROJECT_ID: ${{ needs.setup-filter.outputs.project_id }}
-          TMS_CONFIGURATION_ID: ${{ needs.setup-filter.outputs.configuration_ids }}
-          TMS_ADAPTER_MODE: 0
-        run: |
-          echo "=== TEST EXECUTION ==="
-          echo "TMS_TEST_RUN_ID: $TMS_TEST_RUN_ID"
-          echo "TMS_PROJECT_ID: $TMS_PROJECT_ID"
-          echo "TMS_CONFIGURATION_ID: $TMS_CONFIGURATION_ID"
-          echo "TMS_ADAPTER_MODE: $TMS_ADAPTER_MODE"
-          echo "TMS_URL: [hidden]"
-          echo "TMS_PRIVATE_TOKEN: [hidden]"
-          
-          FILTER_FILE="tmp/filter.txt"
-          if [ ! -f "$FILTER_FILE" ]; then
-            echo "ERROR: Filter file not found at $FILTER_FILE"
-            exit 1
-          fi
-          
-          FILTER_CONTENT=$(cat "$FILTER_FILE" | tr -d '\n' | xargs)
-          echo "Filter content: '$FILTER_CONTENT'"
-          
-          if [ -z "$FILTER_CONTENT" ] || [ "$FILTER_CONTENT" = "empty" ]; then
-            echo "No tests to run according to filter"
-            exit 0
-          fi
-          
-          # ПРАВИЛЬНАЯ КОМАНДА ЗАПУСКА:
-          npx playwright test --grep "$FILTER_CONTENT"
-
-      - name: Upload Playwright report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
+  run-tests:
+    runs-on: ubuntu-latest
+    needs: [get-data-from-webhook, setup-filter]
+    if: always() && (needs.setup-filter.result == 'success' || needs.setup-filter.result == 'skipped')
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Download filter artifact
+      if: needs.get-data-from-webhook.outputs.adapter_mode == '1'
+      uses: actions/download-artifact@v4
+      with:
+        name: test-filter
+        path: tmp/
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: |
+        npm install
+        npx playwright install --with-deps
+    
+    - name: Run Playwright tests (adapterMode=1)
+      if: needs.get-data-from-webhook.outputs.adapter_mode == '1'
+      env:
+        TMS_TOKEN: ${{ secrets.TMS_PRIVATE_TOKEN }}
+        TMS_URL: ${{ needs.get-data-from-webhook.outputs.tms_url }}
+        TMS_TEST_RUN_ID: ${{ needs.get-data-from-webhook.outputs.test_run_id }}
+        TMS_PROJECT_ID: ${{ needs.get-data-from-webhook.outputs.project_id }}
+        TMS_CONFIGURATION_ID: ${{ needs.get-data-from-webhook.outputs.configuration_ids }}
+        TMS_ADAPTER_MODE: ${{ needs.get-data-from-webhook.outputs.adapter_mode }}
+      run: |
+        FILTER=$(cat tmp/filter.txt)
+        if [ -z "$FILTER" ] || [ "$FILTER" = "empty" ]; then
+          echo "No tests to run"
+          exit 0
+        fi
+        npx playwright test --grep "$FILTER"
+    
+    - name: Run Playwright tests (adapterMode=2)
+      if: needs.get-data-from-webhook.outputs.adapter_mode == '2'
+      env:
+        TMS_TOKEN: ${{ secrets.TMS_PRIVATE_TOKEN }}
+        TMS_URL: ${{ needs.get-data-from-webhook.outputs.tms_url }}
+        TMS_PROJECT_ID: ${{ needs.get-data-from-webhook.outputs.project_id }}
+        TMS_CONFIGURATION_ID: ${{ needs.get-data-from-webhook.outputs.configuration_ids }}
+        TMS_ADAPTER_MODE: ${{ needs.get-data-from-webhook.outputs.adapter_mode }}
+      run: |
+        npx playwright test
+    
+    - name: Upload Playwright report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30
