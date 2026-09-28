@@ -85,10 +85,6 @@ jobs:
         file .caches/syncstorage-linux-amd64 | grep -q "ELF.*executable" || { echo "Downloaded file is not an executable"; cat .caches/syncstorage-linux-amd64 | head -c 200; exit 1; }
 
     - name: Start sync-storage
-      env:
-        # Если один результат завис "в процессе", sync-storage сам завершит его через 600 с,
-        # чтобы wait-completion дождался применения всех результатов
-        TMS_SYNC_STORAGE_AUTOCOMPLETE_FALLBACK_S: 600
       run: |
         # adapterMode=1 — прогон из вебхука, передаём testRunId
         # adapterMode=2 — прогон создаёт адаптер, testRunId не передаём
@@ -96,8 +92,13 @@ jobs:
         if [ "${{ env.ADAPTER_MODE }}" == "1" ]; then
           TEST_RUN_ARGS=(--testRunId ${{ env.TEST_RUN_ID }})
         fi
-        nohup .caches/syncstorage-linux-amd64 "${TEST_RUN_ARGS[@]}" --port 49152 \
-          --baseURL ${{ env.TMS_URL }} --privateToken ${{ secrets.TMS_PRIVATE_TOKEN }} > service.log 2>&1 &
+        # Если один результат завис "в процессе", sync-storage сам завершит его через 600 с,
+        # чтобы wait-completion дождался применения всех результатов
+        export TMS_SYNC_STORAGE_AUTOCOMPLETE_FALLBACK_S=600
+        nohup .caches/syncstorage-linux-amd64 "${TEST_RUN_ARGS[@]}" \
+          --port 49152 \
+          --baseURL ${{ env.TMS_URL }} \
+          --privateToken ${{ secrets.TMS_PRIVATE_TOKEN }} > service.log 2>&1 &
         echo $! > syncstorage.pid
         sleep 3
 
