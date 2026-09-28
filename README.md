@@ -9,7 +9,8 @@
 1. Test IT отправляет webhook в GitHub — событие `repository_dispatch` с типом `run-tests`.
 2. Запускается workflow [.github/workflows/.github-ci.yml](.github/workflows/.github-ci.yml).
 3. Устанавливается последняя версия `testit-adapter-playwright`; при `adapter_mode=1` последняя версия `testit-cli` получает из прогона список тестов для запуска. Тесты выполняются через `npx playwright test`, результаты загружаются в Test IT.
-4. К прогону в Test IT прикрепляется ссылка на пайплайн GitHub Actions (`actions/runs/<run_id>`).
+4. В обоих режимах в workflow запускается sync-storage (с `TMS_SYNC_STORAGE_AUTOCOMPLETE_FALLBACK_S=600`). После тестов workflow ждёт `wait-completion`, пока применятся все результаты, и только потом останавливает sync-storage. Лог sync-storage (`service.log`) сохраняется в артефакт `syncstorage-log` на 1 сутки.
+5. К прогону в Test IT прикрепляется ссылка на пайплайн GitHub Actions (`actions/runs/<run_id>`).
 
 ### Режимы запуска
 
@@ -17,7 +18,7 @@
 
 | `adapter_mode` | Что происходит | Имя прогона |
 |---|---|---|
-| `1` | Запускаются только тесты из существующего прогона (фильтр через `testit-cli autotests_filter` → `npx playwright test --grep`), результаты пишутся в этот прогон, `test_run_id` берётся из webhook. Sync-storage запускается в workflow. | `GitHub Actions #<run_number> (adapterMode=1)` |
+| `1` | Запускаются только тесты из существующего прогона (фильтр через `testit-cli autotests_filter` → `npx playwright test --grep`), результаты пишутся в этот прогон, `test_run_id` берётся из webhook. | `GitHub Actions #<run_number> (adapterMode=1)` |
 | `2` | Адаптер сам создаёт новый прогон, `test_run_id` не передаётся. | `GitHub Actions #<run_number> (adapterMode=2)` |
 
 ### Данные из webhook
