@@ -1,0 +1,29 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Зависимости (ставятся в workflow)
+node_modules/
+package.json
+package-lock.json
+
+# Результаты Playwright
+test-results/
+playwright-report/
+blob-report/
+
+# Sync-storage и фильтр testit-cli
+.caches/
+service.log
+syncstorage.pid
+tmp/
+
+# Конфигурация Test IT (передаётся через переменные окружения в workflow)
+testit.properties
+tms.config.json
+.env
+
+# ОС
+.DS_Store
+Thumbs.db
