@@ -5,124 +5,145 @@ on:
     types: [run-tests]
 
 jobs:
-  get-data-from-webhook:
-    runs-on: ubuntu-latest
-    outputs:
-      adapter_mode: ${{ steps.set-vars.outputs.ADAPTER_MODE }}
-      tms_url: ${{ steps.set-vars.outputs.TMS_URL }}
-      test_run_id: ${{ steps.set-vars.outputs.TEST_RUN_ID }}
-      project_id: ${{ steps.set-vars.outputs.PROJECT_ID }}
-      configuration_ids: ${{ steps.set-vars.outputs.CONFIGURATION_IDS }}
-    
-    steps:
-    - name: Get data from webhook
-      id: set-vars
-      run: |
-        echo "ADAPTER_MODE=${{ github.event.client_payload.adapter_mode }}" >> $GITHUB_OUTPUT
-        echo "TMS_URL=${{ github.event.client_payload.url }}" >> $GITHUB_OUTPUT
-        echo "TEST_RUN_ID=${{ github.event.client_payload.test_run_id }}" >> $GITHUB_OUTPUT
-        echo "PROJECT_ID=${{ github.event.client_payload.project_id }}" >> $GITHUB_OUTPUT
-        echo "CONFIGURATION_IDS=${{ github.event.client_payload.configuration_id[0] }}" >> $GITHUB_OUTPUT
-
-  setup-filter:
-    runs-on: ubuntu-latest
-    needs: get-data-from-webhook
-    if: needs.get-data-from-webhook.outputs.adapter_mode == '1'
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.13'
-    
-    - name: Install testit-cli
-      run: |
-        python -m pip install --upgrade pip
-        pip install testit-cli==2.8.1
-    
-    - name: Setup TestIT filter
-      run: |
-        export TMS_TOKEN=${{ secrets.TMS_PRIVATE_TOKEN }}
-        mkdir -p tmp
-        
-        testit autotests_filter \
-          --url "${{ needs.get-data-from-webhook.outputs.tms_url }}" \
-          --configuration-id "${{ needs.get-data-from-webhook.outputs.configuration_ids }}" \
-          --testrun-id "${{ needs.get-data-from-webhook.outputs.test_run_id }}" \
-          --framework playwright \
-          --disable-cert-validation \
-          --output tmp/filter.txt
-        
-        if [ ! -s tmp/filter.txt ]; then
-          echo "empty" > tmp/filter.txt
-        fi
-    
-    - name: Upload filter artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-filter
-        path: tmp/filter.txt
-        retention-days: 1
-
   run-tests:
+    name: Run Playwright tests
     runs-on: ubuntu-latest
-    needs: [get-data-from-webhook, setup-filter]
-    if: always() && (needs.setup-filter.result == 'success' || needs.setup-filter.result == 'skipped')
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Download filter artifact
-      if: needs.get-data-from-webhook.outputs.adapter_mode == '1'
-      uses: actions/download-artifact@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
       with:
-        name: test-filter
-        path: tmp/
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-    
+        node-version: '20'
+
+    - name: Get data from webhook
+      run: |
+        echo "ADAPTER_MODE=${{ github.event.client_payload.adapter_mode }}" >> $GITHUB_ENV
+        echo "TMS_URL=${{ github.event.client_payload.url }}" >> $GITHUB_ENV
+        echo "TEST_RUN_ID=${{ github.event.client_payload.test_run_id }}" >> $GITHUB_ENV
+        echo "PROJECT_ID=${{ github.event.client_payload.project_id }}" >> $GITHUB_ENV
+        echo "CONFIGURATION_IDS=${{ github.event.client_payload.configuration_id[0] }}" >> $GITHUB_ENV
+
     - name: Install dependencies
       run: |
         if [ ! -f package.json ]; then
           npm init -y
         fi
-        npm install @playwright/test
-        npm install testit-adapter-playwright@3.7.0
+        # Всегда ставим последнюю версию адаптера
+        npm install @playwright/test testit-adapter-playwright@latest
         npx playwright install --with-deps
-    
-    - name: Run Playwright tests (adapterMode=1)
-      if: needs.get-data-from-webhook.outputs.adapter_mode == '1'
+
+    - name: Set up Python (adapterMode=1)
+      if: env.ADAPTER_MODE == '1'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+
+    - name: Setup Test IT filter (adapterMode=1)
+      if: env.ADAPTER_MODE == '1'
       env:
-        TMS_PRIVATE_TOKEN: ${{ secrets.TMS_PRIVATE_TOKEN }}
-        TMS_URL: ${{ needs.get-data-from-webhook.outputs.tms_url }}
-        TMS_TEST_RUN_ID: ${{ needs.get-data-from-webhook.outputs.test_run_id }}
-        TMS_PROJECT_ID: ${{ needs.get-data-from-webhook.outputs.project_id }}
-        TMS_CONFIGURATION_ID: ${{ needs.get-data-from-webhook.outputs.configuration_ids }}
-        TMS_ADAPTER_MODE: ${{ needs.get-data-from-webhook.outputs.adapter_mode }}
+        TMS_TOKEN: ${{ secrets.TMS_PRIVATE_TOKEN }}
       run: |
-        FILTER=$(cat tmp/filter.txt)
-        if [ -z "$FILTER" ] || [ "$FILTER" = "empty" ]; then
-          echo "No tests to run"
-          exit 0
+        # Всегда ставим последнюю версию testit-cli
+        python -m pip install --upgrade pip testit-cli
+        mkdir -p tmp
+        testit autotests_filter \
+          --url "${{ env.TMS_URL }}" \
+          --configuration-id "${{ env.CONFIGURATION_IDS }}" \
+          --testrun-id "${{ env.TEST_RUN_ID }}" \
+          --framework playwright \
+          --disable-cert-validation \
+          --output tmp/filter.txt
+        if [ ! -s tmp/filter.txt ]; then
+          echo "empty" > tmp/filter.txt
         fi
-        npx playwright test --grep "$FILTER"
-    
-    - name: Run Playwright tests (adapterMode=2)
-      if: needs.get-data-from-webhook.outputs.adapter_mode == '2'
+        echo "Filter:"
+        cat tmp/filter.txt
+
+    - name: Download sync-storage (adapterMode=1)
+      if: env.ADAPTER_MODE == '1'
+      run: |
+        mkdir -p .caches
+        # Получаем JSON последнего релиза
+        RELEASE_JSON=$(curl -s "https://api.github.com/repos/testit-tms/sync-storage-public/releases/latest")
+        LATEST_VERSION=$(echo "$RELEASE_JSON" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [ -z "$LATEST_VERSION" ]; then
+          echo "Failed to get latest version"
+          exit 1
+        fi
+        echo "Latest sync-storage version: $LATEST_VERSION"
+        # Ищем актив для linux_amd64
+        DOWNLOAD_URL=$(echo "$RELEASE_JSON" | grep -o '"browser_download_url": "[^"]*linux_amd64"' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [ -z "$DOWNLOAD_URL" ]; then
+          echo "Could not find linux_amd64 binary in release"
+          exit 1
+        fi
+        curl -L -o .caches/syncstorage-linux-amd64 "$DOWNLOAD_URL"
+        chmod +x .caches/syncstorage-linux-amd64
+        # Проверка, что скачан реальный исполняемый файл
+        file .caches/syncstorage-linux-amd64 | grep -q "ELF.*executable" || { echo "Downloaded file is not an executable"; cat .caches/syncstorage-linux-amd64 | head -c 200; exit 1; }
+
+    - name: Start sync-storage (adapterMode=1)
+      if: env.ADAPTER_MODE == '1'
+      run: |
+        nohup .caches/syncstorage-linux-amd64 \
+          --testRunId ${{ env.TEST_RUN_ID }} \
+          --port 49152 \
+          --baseURL ${{ env.TMS_URL }} \
+          --privateToken ${{ secrets.TMS_PRIVATE_TOKEN }} \
+          > service.log 2>&1 &
+        echo $! > syncstorage.pid
+        sleep 3
+
+    - name: Run tests
       env:
         TMS_PRIVATE_TOKEN: ${{ secrets.TMS_PRIVATE_TOKEN }}
-        TMS_URL: ${{ needs.get-data-from-webhook.outputs.tms_url }}
-        TMS_PROJECT_ID: ${{ needs.get-data-from-webhook.outputs.project_id }}
-        TMS_CONFIGURATION_ID: ${{ needs.get-data-from-webhook.outputs.configuration_ids }}
-        TMS_ADAPTER_MODE: ${{ needs.get-data-from-webhook.outputs.adapter_mode }}
       run: |
-        npx playwright test
-    
+        # adapterMode=1 — запускаются только тесты из существующего прогона (фильтр testit-cli)
+        # adapterMode=2 — адаптер сам создаёт новый прогон, testRunId не передаём
+        GREP_ARGS=()
+        if [ "${{ env.ADAPTER_MODE }}" == "1" ]; then
+          FILTER=$(cat tmp/filter.txt)
+          if [ -z "$FILTER" ] || [ "$FILTER" = "empty" ]; then
+            echo "No tests to run"
+            exit 0
+          fi
+          GREP_ARGS=(--grep "$FILTER")
+          export TMS_TEST_RUN_ID=${{ env.TEST_RUN_ID }}
+          export TMS_SYNC_STORAGE_PORT=49152
+        fi
+
+        export TMS_TEST_RUN_LINKS=$(jq -nc \
+          --arg runUrl "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          '[{url: $runUrl, title: "GitHub Actions pipeline", type: "Related"}]')
+
+        export TMS_URL=${{ env.TMS_URL }}
+        export TMS_PROJECT_ID=${{ env.PROJECT_ID }}
+        export TMS_CONFIGURATION_ID=${{ env.CONFIGURATION_IDS }}
+        export TMS_TEST_RUN_NAME="GitHub Actions #${{ github.run_number }} (adapterMode=${{ env.ADAPTER_MODE }})"
+        export TMS_ADAPTER_MODE=${{ env.ADAPTER_MODE }}
+        export TMS_CERT_VALIDATION=false
+        export TMS_IMPORT_REALTIME=true
+
+        npx playwright test "${GREP_ARGS[@]}"
+
+    - name: Wait for sync-storage completion (adapterMode=1)
+      if: always() && env.ADAPTER_MODE == '1'
+      run: |
+        curl -v "http://127.0.0.1:49152/wait-completion?testRunId=${{ env.TEST_RUN_ID }}" || true
+        if [ -f syncstorage.pid ]; then
+          kill $(cat syncstorage.pid) || true
+        fi
+
+    - name: Upload sync-storage logs (on failure)
+      if: failure() && env.ADAPTER_MODE == '1'
+      uses: actions/upload-artifact@v4
+      with:
+        name: syncstorage-logs
+        path: service.log
+
     - name: Upload Playwright report
       if: always()
       uses: actions/upload-artifact@v4
